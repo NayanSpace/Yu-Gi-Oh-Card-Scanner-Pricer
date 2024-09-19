@@ -1,19 +1,30 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import {Routes, Route, useNavigate, Navigate } from 'react-router-dom'; // Import necessary components for routing
 import cv from "@techstark/opencv-js";
 import Tesseract from 'tesseract.js';  // Import Tesseract.js for OCR
+import Market from './market';
 
 const HomePage = () => {
   const canvasRef = useRef(null);
   const [isCvLoaded, setIsCvLoaded] = useState(false);
   const [imageCaptured, setImageCaptured] = useState(null);
   const [ocrText, setOcrText] = useState(''); // State to store OCR text
+  var isCardFound = false;
+  var detectedCardName = '';
   const blockSizes = [3, 7, 15, 21, 23, 25, 27, 29, 31, 33, 35, 37, 39, 41, 43, 45, 47, 49, 51, 53, 55, 57, 59, 61, 63, 65, 67, 69, 71, 73, 75, 77, 79, 81, 83, 85, 87, 89, 91, 93, 95, 97, 99];
   const allowedWords = useRef(new Set());
   const textDetected = useRef([]);
   const cardNameList = useRef(new Set());
+  const navigate = useNavigate();
   var blockSize = 11;
   var isImageCaptured = false;
 
+  const checkAndRedirect = () => {
+    if (isCardFound) {
+      console.log("Redirecting to: ", detectedCardName);
+      navigate(`/market/${detectedCardName}`); // Navigate to the Market page with the card name
+    }
+  };
 
   useEffect(() => {
     cv['onRuntimeInitialized'] = () => {
@@ -33,7 +44,7 @@ const HomePage = () => {
 
         for(let i = 0; i < names.length; i++){
           cardNameList.current.add(names[i]);
-          const wordsInName = names[i].split(" ");
+          const wordsInName = names[i].split(/(?:,| |-)+/)
 
           for(let j = 0; j < wordsInName.length; j++){
             allowedWords.current.add(wordsInName[j]);
@@ -80,6 +91,9 @@ const HomePage = () => {
       } 
       if(possibleNames.length === 1){
         console.log("One Possible name left: ", possibleNames.join(', '));
+        detectedCardName = possibleNames[0];
+        isCardFound = true;
+        checkAndRedirect();
         return;
       }
         const possibleNamesBuff = possibleNames;
@@ -111,6 +125,9 @@ const HomePage = () => {
           }
         }
         console.log("Best Guess for Name: ", possibleNames[bestMatch]);
+        detectedCardName = possibleNames[bestMatch];
+        isCardFound = true;
+        checkAndRedirect();
     }
   };
 
@@ -239,6 +256,10 @@ const HomePage = () => {
     const croppedImage = offScreenCanvas.toDataURL('image/png');
     setImageCaptured(croppedImage);
 
+    const avgColor = getAverageColor(imageData);
+    const cardType = determineCardType(avgColor);
+    console.log(cardType);
+
     let ocrResults = [];
 
     const processOCR = (index) => {
@@ -310,6 +331,82 @@ const HomePage = () => {
     return distanceMatrix[len1][len2];
   };
 
+  // Function to get the average color in the image data
+  const getAverageColor = (imageData) => {
+    let r = 0, g = 0, b = 0;
+    let count = 0; // Counter for non-white pixels
+
+    for (let i = 0; i < imageData.data.length; i += 4) {
+        const red = imageData.data[i];      // Red
+        const green = imageData.data[i + 1];  // Green
+        const blue = imageData.data[i + 2];  // Blue
+
+        // Check if the pixel is not white (you can adjust the threshold if needed)
+        if (!(red > 150 && green > 150 && blue > 150) && !(red < 100 && green < 100 && blue < 100)) {
+            r += red;
+            g += green;
+            b += blue;
+            count++;
+        }
+    }
+
+    // Avoid division by zero if no non-white pixels are found
+    if (count === 0) {
+        return { r: 0, g: 0, b: 0 }; // Or return a different default color
+    }
+
+    // Calculate average color
+    r = Math.floor(r / count);
+    g = Math.floor(g / count);
+    b = Math.floor(b / count);
+
+    return { r, g, b };
+  };
+
+  const determineCardType = (avgColor) => {
+    const { r, g, b } = avgColor;
+    /* This is not perfect and can be 100% more optimized, but more less gets the job done.
+       The value where got just from scanning a few card and get there colour and based on
+       that we made range of test cases. It not always going to be accurate but this is
+       more as a help function so it doesn't always have to look through 11,000 or so cards everytime
+       it scans a card. It can be made much more accurate if you use like 100 cards to test there
+       colours and then make a test case for that, but where lazy lol.
+    */
+
+    //Stable Green
+    if (165 < r && r < 200 && 135 < g && g < 175 && 65 < b && b < 115) {
+      return `Monster (R: ${r}, G: ${g}, B: ${b})`;
+
+    } else if (70 < r && r < 121 && 154 < g && g < 196 && 114 < b && b < 174) {
+      return `Spell Card (R: ${r}, G: ${g}, B: ${b})`;
+    } else if (130< r && r < 217 && 110 < g && g < 164 && 105 < b && b <250) {
+      return `Trap (R: ${r}, G: ${g}, B: ${b})`;
+
+      // Stable Blue
+    } else if (145 < r && r < 195 && 135 < g && g < 195 && 50 < b && b < 95) {
+      return `Normal Monster (R: ${r}, G: ${g}, B: ${b})`;
+
+      //Stable Blue & Green
+    } else if (80 < r && r < 130 && 125 < g && g < 165 && 145 < b && b < 165 ) {
+      return `Ritual Monster (R: ${r}, G: ${g}, B: ${b})`;
+
+      // For link monster it not that stable cause our scanner has trouble scanning link card.
+    } else if(65 < r && r < 120 && 110 < g && g < 155 && 135 < b && b < 185) {
+      return `Link Monster (R: ${r}, G: ${g}, B: ${b})`;
+
+      // Same for this pretty bad
+    } else if (110 < r && r < 160 && 115 < g && g < 150 && 125 < b && 185) {
+      return `Fusion Monster (R: ${r}, G: ${g}, B: ${b})`;
+
+      // Stable Green&Blue
+    } else if (155 < r && r < 190 && 170 < g && g < 200 && 130 < b && b < 150) {
+      return `Synchro Monster (R: ${r}, G: ${g}, B: ${b})`;
+
+    } else {
+      return `Unknown Type (R: ${r}, G: ${g}, B: ${b})`;
+    }
+  };
+
  const processFrame = useCallback(() => {
   if (canvasRef.current && isCvLoaded) {
     const video = document.createElement('video');
@@ -320,7 +417,7 @@ const HomePage = () => {
     const videoConstraints = {
       width: { ideal: 640 }, // Or use a resolution like 480
       height: { ideal: 480 }, // Adjust based on your needs
-      facingMode: "environment", // or "environment" depending on your camera use case
+      facingMode: "environment", // user or "environment" depending on your camera use case
     };
 
     navigator.mediaDevices.getUserMedia({ video: videoConstraints }).then((stream) => {
@@ -356,8 +453,20 @@ const HomePage = () => {
             const gray = new cv.Mat();
             cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
 
+            const blurred = new cv.Mat();
+            cv.GaussianBlur(gray, blurred, new cv.Size(9, 9), 0);
+
+//            const equalizedGray = new cv.Mat();
+//            cv.equalizeHist(blurred, equalizedGray);
+
+            const adaptiveThreshold = new cv.Mat();
+            cv.adaptiveThreshold(blurred, adaptiveThreshold, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 11, 2);
+
             const edges = new cv.Mat();
-            cv.Canny(gray, edges, 50, 150);
+            cv.Canny(adaptiveThreshold, edges, 10, 40);
+
+//            const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
+//            cv.dilate(edges, edges, kernel);
 
             const contours = new cv.MatVector();
             const hierarchy = new cv.Mat();
@@ -375,11 +484,21 @@ const HomePage = () => {
               const area = rect.width * rect.height;
 
               if (
-                rect.x >= centralBox.x &&
-                rect.y >= centralBox.y &&
-                rect.x + rect.width <= centralBox.x + centralBox.width &&
-                rect.y + rect.height <= centralBox.y + centralBox.height
+                rect.x > centralBox.x &&
+                rect.y > centralBox.y &&
+                rect.x + rect.width < centralBox.x + centralBox.width &&
+                rect.y + rect.height < centralBox.y + centralBox.height
               ) {
+
+                if (aspectRatio > 0.8 && aspectRatio < 1.2 && area > (centralBox.area * 0.375) && area < (centralBox.area * 0.5) && !detectedArt && (rect.y > (centralBox.y + 20 + 50))) {
+                    cv.rectangle(
+                    src,
+                    new cv.Point(rect.x, rect.y),
+                    new cv.Point(rect.x + rect.width, rect.y + rect.height),
+                    [0, 255, 0, 255], // Green color for all rectangles
+                    2
+                    );
+                }
                 if (aspectRatio > 0.8 && aspectRatio < 1.2 && area > (centralBox.area * 0.375) && area < (centralBox.area * 0.5) && !detectedArt && (rect.y > (centralBox.y + 20 + 50))) {
                   if(detectedDescription){
                     if(rect.y + rect.height < rectanglesToDraw[0].y){
@@ -454,6 +573,10 @@ const HomePage = () => {
             edges.delete();
             contours.delete();
             hierarchy.delete();
+            blurred.delete();
+            adaptiveThreshold.delete();
+//            equalizedGray.delete();
+//            kernel.delete();
           }
 
           if (!isImageCaptured) { // Continue processing only if image is not captured
@@ -473,26 +596,34 @@ const HomePage = () => {
     }
   }, [isCvLoaded, processFrame]);
 
-  return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-center text-3xl font-bold mb-4">Webcam Card Detection</h1>
-      <div className="flex flex-col items-center">
-        <canvas ref={canvasRef} width="640" height="480" className="border-2 border-gray-300" />
-        {imageCaptured && (
-          <div className="mt-4">
-            <h2 className="text-lg font-semibold">Captured Image</h2>
-            <img src={imageCaptured} alt="Captured Image" className="mt-2" />
-            {ocrText && (
-              <div className="mt-2">
-                <h3 className="text-md font-semibold">Detected Text:</h3>
-                <p>{ocrText}</p>
+return (
+    <Routes>
+      {/* Redirect from root to /Homepage */}
+      <Route path="/" element={<Navigate to="/Homepage" />} />
+      {/* Render the HomePage component */}
+      <Route path="/Homepage" element={
+        <div className="container mx-auto p-4">
+          <h1 className="text-center text-3xl font-bold mb-4">Webcam Card Detection</h1>
+          <div className="flex flex-col items-center">
+            <canvas ref={canvasRef} width="640" height="480" className="border-2 border-gray-300" />
+            {imageCaptured && (
+              <div className="mt-4">
+                <h2 className="text-lg font-semibold">Captured Image</h2>
+                <img src={imageCaptured} alt="Captured Image" className="mt-2" />
+                {ocrText && (
+                  <div className="mt-2">
+                    <h3 className="text-md font-semibold">Detected Text:</h3>
+                    <p>{ocrText}</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
-        )}
-      </div>
-    </div>
+        </div>
+      } />
+      {/* Render the Market component */}
+      <Route path="/market/:monsterName" element={<Market />} />
+    </Routes>
   );
 };
-
 export default HomePage;

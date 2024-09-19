@@ -1,9 +1,12 @@
 const express = require('express');
 const puppeteer = require('puppeteer');
 const cheerio = require('cheerio');
+const cors = require('cors');
 
 const app = express();
-const port = 5000;
+const port = 4000;
+
+app.use(cors());
 
 app.get('/scrape', async (req, res) => {
   const monsterName = req.query.monster;
@@ -19,7 +22,7 @@ app.get('/scrape', async (req, res) => {
     // Navigate to yugiohprices.com and search for the monster name
     await page.goto('https://yugiohprices.com/', { waitUntil: 'domcontentloaded' });
     await page.type('#autocomplete', monsterName);
-    await page.click('.search-submit');
+    await page.keyboard.press('Enter');
 
     // Wait for the page to load and display results
     await page.waitForSelector('.primary-content');
