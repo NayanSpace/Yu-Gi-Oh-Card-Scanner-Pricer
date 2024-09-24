@@ -22,6 +22,7 @@ function Market() {
       try {
         const response = await fetch(`http://localhost:4000/scrape?monster=${monsterName}`);
         const data = await response.json();
+        console.log('Fetched card data:', data);
         setCardData(data);
       } catch (error) {
         console.log(monsterName);

@@ -24,6 +24,8 @@ app.get('/scrape', async (req, res) => {
     await page.type('#autocomplete', monsterName);
     await page.keyboard.press('Enter');
 
+    await page.waitForNavigation({ waitUntil: 'networkidle2' });
+
     // Wait for the page to load and display results
     await page.waitForSelector('.primary-content');
 
@@ -68,6 +70,9 @@ app.get('/scrape', async (req, res) => {
       }
 
     });
+
+    console.log("Scraped data:", cardData);
+
 
     // Close Puppeteer
     await browser.close();

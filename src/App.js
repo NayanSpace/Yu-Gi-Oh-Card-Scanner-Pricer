@@ -85,10 +85,10 @@ const HomePage = () => {
           console.log("Text Estimation after Next Round: ", textEstBuff);
           possibleNames = generatePossibleNames(textEstBuff, names);
           console.log("Possible Names After Next Round: ", possibleNames);
-        } 
+        }
 
         textEst = textEstBuff;
-      } 
+      }
       if(possibleNames.length === 1){
         console.log("One Possible name left: ", possibleNames.join(', '));
         detectedCardName = possibleNames[0];
@@ -142,7 +142,8 @@ const HomePage = () => {
       )
         .then(({ data: { text } }) => {
           text = normalizeText(text);
-          textDetected.current.push(text);
+          const splitText = text.split("\n");
+          textDetected.current = textDetected.current.concat(splitText);
           setOcrText(text); // Update state with the detected text
           resolve(text); // Resolve the promise with the detected text
         })
@@ -266,6 +267,8 @@ const HomePage = () => {
       if (index >= blockSizes.length) {
         // After all OCR processing is complete
         // Call checkCardNames here once after processing all OCR
+        removeShortElements();
+        filterByLevenshteinWithDynamicThreshold();
         checkCardNames(textDetected.current, cardNameList.current);
 
         return; // Exit the function
@@ -331,6 +334,61 @@ const HomePage = () => {
     return distanceMatrix[len1][len2];
   };
 
+  const removeShortElements = () => {
+    // Calculate the average length of all text elements in textDetected
+    const totalLength = textDetected.current.reduce((sum, text) => sum + text.length, 0);
+    const averageLength = totalLength / textDetected.current.length;
+
+    // Define a threshold for "significantly shorter" (e.g., less than 50% of average length)
+    const threshold = averageLength * 0.5;
+
+    // Filter out elements shorter than the threshold
+    textDetected.current = textDetected.current.filter(text => text.length >= threshold);
+
+    console.log("Filter 1: ", textDetected.current);
+  };
+
+  // Modify the filterByLevenshtein function to iterate and increment the threshold if necessary
+  const filterByLevenshteinWithDynamicThreshold = () => {
+    let threshold = 10;  // Start with a threshold of 10
+    const maxThreshold = 50;  // Set a reasonable upper limit to avoid infinite loop
+    let filteredArr = [];
+
+    const arr = textDetected.current;  // Reference the current value of textDetected
+
+    // Iteratively increase the threshold until filteredArr is not empty or max threshold is reached
+    while (filteredArr.length === 0 && threshold <= maxThreshold) {
+      filteredArr = [];
+
+      // Calculate distances and filter by the current threshold
+      for (let i = 0; i < arr.length; i++) {
+        let totalDistance = 0;
+
+        for (let j = 0; j < arr.length; j++) {
+          if (i !== j) {
+            totalDistance += levenshteinDistance(arr[i], arr[j]);
+          }
+        }
+
+        const avgDistance = totalDistance / (arr.length - 1);
+
+        if (avgDistance < threshold) {
+          filteredArr.push(arr[i]);
+        }
+      }
+
+      // If filteredArr is empty, increase the threshold and try again
+      if (filteredArr.length === 0) {
+        threshold += 5;  // Increment the threshold by 5
+        console.log(`Threshold increased to: ${threshold}`);
+      }
+    }
+
+    // Modify textDetected.current in place with the filtered result
+    textDetected.current = filteredArr;
+    console.log("Filtered textDetected.current:", textDetected.current);
+  };
+
   // Function to get the average color in the image data
   const getAverageColor = (imageData) => {
     let r = 0, g = 0, b = 0;
@@ -342,7 +400,7 @@ const HomePage = () => {
         const blue = imageData.data[i + 2];  // Blue
 
         // Check if the pixel is not white (you can adjust the threshold if needed)
-        if (!(red > 150 && green > 150 && blue > 150) && !(red < 100 && green < 100 && blue < 100)) {
+        if (!(red > 180 && green > 180 && blue > 180) && !(red < 80 && green < 80 && blue < 80)) {
             r += red;
             g += green;
             b += blue;
@@ -378,9 +436,9 @@ const HomePage = () => {
       return `Monster (R: ${r}, G: ${g}, B: ${b})`;
 
     } else if (70 < r && r < 121 && 154 < g && g < 196 && 114 < b && b < 174) {
-      return `Spell Card (R: ${r}, G: ${g}, B: ${b})`;
-    } else if (130< r && r < 217 && 110 < g && g < 164 && 105 < b && b <250) {
-      return `Trap (R: ${r}, G: ${g}, B: ${b})`;
+      return "Spell Card";
+    } else if (178 < r && r < 217 && 110 < g && g < 164 && 105 < b && b <157) {
+      return "Trap Card";
 
       // Stable Blue
     } else if (145 < r && r < 195 && 135 < g && g < 195 && 50 < b && b < 95) {
@@ -417,7 +475,7 @@ const HomePage = () => {
     const videoConstraints = {
       width: { ideal: 640 }, // Or use a resolution like 480
       height: { ideal: 480 }, // Adjust based on your needs
-      facingMode: "environment", // user or "environment" depending on your camera use case
+      facingMode: "environment", // "user" or "environment" depending on your camera use case
     };
 
     navigator.mediaDevices.getUserMedia({ video: videoConstraints }).then((stream) => {
@@ -456,17 +514,11 @@ const HomePage = () => {
             const blurred = new cv.Mat();
             cv.GaussianBlur(gray, blurred, new cv.Size(9, 9), 0);
 
-//            const equalizedGray = new cv.Mat();
-//            cv.equalizeHist(blurred, equalizedGray);
-
             const adaptiveThreshold = new cv.Mat();
             cv.adaptiveThreshold(blurred, adaptiveThreshold, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 11, 2);
 
             const edges = new cv.Mat();
             cv.Canny(adaptiveThreshold, edges, 10, 40);
-
-//            const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
-//            cv.dilate(edges, edges, kernel);
 
             const contours = new cv.MatVector();
             const hierarchy = new cv.Mat();
@@ -489,16 +541,6 @@ const HomePage = () => {
                 rect.x + rect.width < centralBox.x + centralBox.width &&
                 rect.y + rect.height < centralBox.y + centralBox.height
               ) {
-
-                if (aspectRatio > 0.8 && aspectRatio < 1.2 && area > (centralBox.area * 0.375) && area < (centralBox.area * 0.5) && !detectedArt && (rect.y > (centralBox.y + 20 + 50))) {
-                    cv.rectangle(
-                    src,
-                    new cv.Point(rect.x, rect.y),
-                    new cv.Point(rect.x + rect.width, rect.y + rect.height),
-                    [0, 255, 0, 255], // Green color for all rectangles
-                    2
-                    );
-                }
                 if (aspectRatio > 0.8 && aspectRatio < 1.2 && area > (centralBox.area * 0.375) && area < (centralBox.area * 0.5) && !detectedArt && (rect.y > (centralBox.y + 20 + 50))) {
                   if(detectedDescription){
                     if(rect.y + rect.height < rectanglesToDraw[0].y){
@@ -509,7 +551,7 @@ const HomePage = () => {
                     detectedArt = true;
                     rectanglesToDraw.push(rect);
                   }
-                } else if (aspectRatio > 2.5 && aspectRatio < 3.2 && area > (centralBox.area * 0.15) && area < (centralBox.area * 0.21) && !detectedDescription) {
+                } else if (aspectRatio > 2.5 && aspectRatio < 3.5 && area > (centralBox.area * 0.15) && area < (centralBox.area * 0.21) && !detectedDescription) {
                   if(detectedArt){
                     if(rect.y > rectanglesToDraw[0].y + rectanglesToDraw[0].height){
                       detectedDescription = true;
@@ -546,7 +588,7 @@ const HomePage = () => {
                 2
               );
               console.log("Default rectangle drawn.");
-            } 
+            }
 
             if (detectedArt && detectedDescription) {
               rectanglesToDraw.forEach((rect) => {
@@ -575,8 +617,6 @@ const HomePage = () => {
             hierarchy.delete();
             blurred.delete();
             adaptiveThreshold.delete();
-//            equalizedGray.delete();
-//            kernel.delete();
           }
 
           if (!isImageCaptured) { // Continue processing only if image is not captured
