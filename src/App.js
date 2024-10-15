@@ -11,13 +11,16 @@ const HomePage = () => {
   const [ocrText, setOcrText] = useState(''); // State to store OCR text
   var isCardFound = false;
   var detectedCardName = '';
-  const blockSizes = [3, 7, 15, 21, 23, 25, 27, 29, 31, 33, 35, 37, 39, 41, 43, 45, 47, 49, 51, 53, 55, 57, 59, 61, 63, 65, 67, 69, 71, 73, 75, 77, 79, 81, 83, 85, 87, 89, 91, 93, 95, 97, 99];
+  const blockSizes = [15, 21, 25, 29, 33, 37, 41, 45, 49, 53, 57, 61, 65, 69, 73];
   const allowedWords = useRef(new Set());
   const textDetected = useRef([]);
+  const textDetectedCopy = useRef(textDetected.current);
   const cardNameList = useRef(new Set());
   const navigate = useNavigate();
   var blockSize = 11;
   var isImageCaptured = false;
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
 
   const checkAndRedirect = () => {
     if (isCardFound) {
@@ -26,7 +29,22 @@ const HomePage = () => {
     }
   };
 
+  const resetState = () => {
+      setImageCaptured(null);
+      setOcrText('');
+      isCardFound = false;
+      detectedCardName = '';
+      textDetected.current = [];
+      textDetectedCopy.current = [];
+
+      stopCamera();
+
+      startCamera();
+    };
+
   useEffect(() => {
+    resetState();
+
     cv['onRuntimeInitialized'] = () => {
       setIsCvLoaded(true);
       console.log('OpenCV loaded successfully.');
@@ -58,7 +76,7 @@ const HomePage = () => {
     };
 
     fetchCardNames();
-  }, []);
+  }, [navigate, isCvLoaded]);
 
   const checkCardNames = (recognizedText, names) => {
     console.log('Detected text:', recognizedText);
@@ -97,33 +115,35 @@ const HomePage = () => {
         return;
       }
         const possibleNamesBuff = possibleNames;
-        const textDetectedBuff = textDetected.current;
+        const textDetectedBuff = textDetectedCopy.current;
 
         console.log("Remaining possible name strs: ", possibleNamesBuff);
         console.log("Remaining possible text strs: ", textDetectedBuff);
 
+        let estimatedNames = [];
         let minDist = 999999;
         let bestMatch = 99999;
 
-        for(let i = 0; i < possibleNamesBuff.length; i++){
-          if(possibleNamesBuff[i] === ""){
-            bestMatch = i;
-            i = possibleNamesBuff.length;
-          } else{
-            let dist = 0;
 
-            for (let compareElement of textDetectedBuff) {
-              dist += levenshteinDistance(possibleNamesBuff[i], compareElement);
+        // Loop through textDetectedBuff first, then through possibleNamesBuff
+        for (let compareElement of textDetectedBuff) {
+            for (let i = 0; i < possibleNamesBuff.length; i++) {
+                if (possibleNamesBuff[i] === "") {
+                    bestMatch = i;
+                    break;
+                } else {
+                    let dist = levenshteinDistance(possibleNamesBuff[i], compareElement);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        bestMatch = i;
+                        console.log("Current Leader: ", possibleNames[bestMatch], " Distance: ", minDist);
+                    }
+                }
             }
-
-            if(dist < minDist){
-              minDist = dist;
-              bestMatch = i;
-
-              console.log("Current Leader: ", possibleNames[bestMatch], " Distance: ", minDist)
-            }
-          }
+            estimatedNames.push(possibleNames[bestMatch]);
         }
+
+        console.log("Best Estimate for each text detected: ", estimatedNames);
         console.log("Best Guess for Name: ", possibleNames[bestMatch]);
         detectedCardName = possibleNames[bestMatch];
         isCardFound = true;
@@ -165,20 +185,37 @@ const HomePage = () => {
 
       words.forEach((word) => {
         const normalizedWord = word.toUpperCase(); // Normalize case
-        // Step 2: Check if any allowed word is included in the normalized word
+        // Optional: Remove punctuation for more accurate matching
+        // const cleanedWord = normalizedWord.replace(/[^\w\s]/gi, '');
+
         allowedWords.current.forEach((allowedWord) => {
-          if (allowedWord.length > 2 && normalizedWord.includes(allowedWord.toUpperCase())) {
-            wordFrequency[allowedWord.toUpperCase()] = (wordFrequency[allowedWord.toUpperCase()] || 0) + 1;
+          const normalizedAllowedWord = allowedWord.toUpperCase();
+          if (
+            allowedWord.length > 2 &&
+            normalizedWord.includes(normalizedAllowedWord)
+          ) {
+            wordFrequency[normalizedAllowedWord] =
+              (wordFrequency[normalizedAllowedWord] || 0) + 1;
           }
         });
       });
     });
 
-    // Step 3: Sort allowed words by frequency
-    const sortedWords = Object.entries(wordFrequency).sort((a,b) => b[1] - a[1]).map(([word]) => word);
+    // Step 3: Sort allowed words by frequency and then by length
+    const sortedWords = Object.entries(wordFrequency)
+      .sort((a, b) => {
+        // First, sort by frequency in descending order
+        if (b[1] !== a[1]) {
+          return b[1] - a[1];
+        }
+        // If frequencies are equal, sort by word length in descending order
+        return b[0].length - a[0].length;
+      })
+      .map(([word]) => word);
 
     return sortedWords;
   };
+
 
   const generatePossibleNames = (textWords, cardNames) => {
     const predictedNames = [];
@@ -257,8 +294,9 @@ const HomePage = () => {
     const croppedImage = offScreenCanvas.toDataURL('image/png');
     setImageCaptured(croppedImage);
 
-    const avgColor = getAverageColor(imageData);
-    const cardType = determineCardType(avgColor);
+    const imageOffScreen = cv.imread(offScreenCanvas)
+    const avgHSV = getAverageHSVColor(imageOffScreen);
+    const cardType = determineCardTypeFromHSV(avgHSV);
     console.log(cardType);
 
     let ocrResults = [];
@@ -268,7 +306,9 @@ const HomePage = () => {
         // After all OCR processing is complete
         // Call checkCardNames here once after processing all OCR
         removeShortElements();
-        filterByLevenshteinWithDynamicThreshold();
+        textDetectedCopy.current = textDetected.current;
+        textDetected.current = autocorrect(textDetected.current);
+        console.log("Autocorrect: ", textDetected.current);
         checkCardNames(textDetected.current, cardNameList.current);
 
         return; // Exit the function
@@ -334,6 +374,42 @@ const HomePage = () => {
     return distanceMatrix[len1][len2];
   };
 
+// Function to find the closest matching words in allowedWords
+function findClosestMatch(word) {
+    let allowedWordsArray = Array.from(allowedWords.current);
+    let closestWords = [];  // Array to store words with the minimum distance
+    let minDistance = Math.max(1, Math.floor(word.length / 2));
+
+    if (word.length > 2) {
+        allowedWordsArray.forEach((allowedWord) => {
+            const distance = levenshteinDistance(word.toUpperCase(), allowedWord.toUpperCase());
+
+            if (distance < minDistance) {
+                // New minimum distance found, reset the array
+                minDistance = distance;
+                closestWords = [allowedWord.toUpperCase()];
+            } else if (distance === minDistance) {
+                // Add the word to the array if it has the same minDistance
+                closestWords.push(allowedWord.toUpperCase());
+            }
+        });
+    }
+    if(closestWords.length > 3){
+      return word;
+    }
+    // Join all closest words into a single string, separated by a space (or any other delimiter)
+    return closestWords.length > 0 ? closestWords.join(', ') : word;
+}
+
+  // Modified autocorrect function to handle an array of input strings
+  function autocorrect(inputStrings) {
+      return inputStrings.map(inputString => {
+          const words = inputString.split(/\s+/);
+          const correctedWords = words.map((word) => findClosestMatch(word));
+          return correctedWords.join(' ');
+      });
+  }
+
   const removeShortElements = () => {
     // Calculate the average length of all text elements in textDetected
     const totalLength = textDetected.current.reduce((sum, text) => sum + text.length, 0);
@@ -389,83 +465,107 @@ const HomePage = () => {
     console.log("Filtered textDetected.current:", textDetected.current);
   };
 
-  // Function to get the average color in the image data
-  const getAverageColor = (imageData) => {
-    let r = 0, g = 0, b = 0;
-    let count = 0; // Counter for non-white pixels
+const getAverageHSVColor = (imageOffScreen) => {
+    const hsvImage = new cv.Mat();
+    // Convert the image to HSV
+    cv.cvtColor(imageOffScreen, hsvImage, cv.COLOR_RGB2HSV);
 
-    for (let i = 0; i < imageData.data.length; i += 4) {
-        const red = imageData.data[i];      // Red
-        const green = imageData.data[i + 1];  // Green
-        const blue = imageData.data[i + 2];  // Blue
+    // Create an object to store frequencies of HSV values (we'll use hue for frequency)
+    const hueFrequency = {};
+    let totalS = 0, totalV = 0;
+    let count = 0;
 
-        // Check if the pixel is not white (you can adjust the threshold if needed)
-        if (!(red > 180 && green > 180 && blue > 180) && !(red < 80 && green < 80 && blue < 80)) {
-            r += red;
-            g += green;
-            b += blue;
+    for (let i = 0; i < hsvImage.rows; i++) {
+        for (let j = 0; j < hsvImage.cols; j++) {
+            const hsvPixel = hsvImage.ucharPtr(i, j);
+            const h = hsvPixel[0];  // Hue value
+            const s = hsvPixel[1];  // Saturation value
+            const v = hsvPixel[2];  // Value (brightness)
+
+            // Increase the hue frequency count
+            hueFrequency[h] = (hueFrequency[h] || 0) + 1;
+
+            // Track the total saturation and value for average calculation
+            totalS += s;
+            totalV += v;
             count++;
         }
     }
 
-    // Avoid division by zero if no non-white pixels are found
-    if (count === 0) {
-        return { r: 0, g: 0, b: 0 }; // Or return a different default color
+    // Find the most common hue value
+    let mostCommonHue = 0;
+    let maxCount = 0;
+    for (const h in hueFrequency) {
+        if (hueFrequency[h] > maxCount) {
+            maxCount = hueFrequency[h];
+            mostCommonHue = h;
+        }
     }
 
-    // Calculate average color
-    r = Math.floor(r / count);
-    g = Math.floor(g / count);
-    b = Math.floor(b / count);
+    // Calculate average saturation and value
+    const averageS = ((totalS / count) / 255) * 100;
+    const averageV = ((totalV / count) / 255) * 100;
 
-    return { r, g, b };
+    // Clean up the OpenCV matrix
+    hsvImage.delete();
+
+    return { h: mostCommonHue, s: averageS, v: averageV };
   };
 
-  const determineCardType = (avgColor) => {
-    const { r, g, b } = avgColor;
-    /* This is not perfect and can be 100% more optimized, but more less gets the job done.
-       The value where got just from scanning a few card and get there colour and based on
-       that we made range of test cases. It not always going to be accurate but this is
-       more as a help function so it doesn't always have to look through 11,000 or so cards everytime
-       it scans a card. It can be made much more accurate if you use like 100 cards to test there
-       colours and then make a test case for that, but where lazy lol.
-    */
+  const determineCardTypeFromHSV = (avgHSV) => {
+    const { h, s, v } = avgHSV;
 
-    //Stable Green
-    if (165 < r && r < 200 && 135 < g && g < 175 && 65 < b && b < 115) {
-      return `Monster (R: ${r}, G: ${g}, B: ${b})`;
-
-    } else if (70 < r && r < 121 && 154 < g && g < 196 && 114 < b && b < 174) {
-      return "Spell Card";
-    } else if (178 < r && r < 217 && 110 < g && g < 164 && 105 < b && b <157) {
-      return "Trap Card";
-
-      // Stable Blue
-    } else if (145 < r && r < 195 && 135 < g && g < 195 && 50 < b && b < 95) {
-      return `Normal Monster (R: ${r}, G: ${g}, B: ${b})`;
-
-      //Stable Blue & Green
-    } else if (80 < r && r < 130 && 125 < g && g < 165 && 145 < b && b < 165 ) {
-      return `Ritual Monster (R: ${r}, G: ${g}, B: ${b})`;
-
-      // For link monster it not that stable cause our scanner has trouble scanning link card.
-    } else if(65 < r && r < 120 && 110 < g && g < 155 && 135 < b && b < 185) {
-      return `Link Monster (R: ${r}, G: ${g}, B: ${b})`;
-
-      // Same for this pretty bad
-    } else if (110 < r && r < 160 && 115 < g && g < 150 && 125 < b && 185) {
-      return `Fusion Monster (R: ${r}, G: ${g}, B: ${b})`;
-
-      // Stable Green&Blue
-    } else if (155 < r && r < 190 && 170 < g && g < 200 && 130 < b && b < 150) {
-      return `Synchro Monster (R: ${r}, G: ${g}, B: ${b})`;
-
+    if (h >= 40 && h <= 10 ) {
+        return `Monster (H: ${h}, S: ${s}, V: ${v})`;
+    } else if (h >= 100 && h <= 70) {
+        return `Spell (H: ${h}, S: ${s}, V: ${v})`;
+    } else if (h >= 130 && h <= 160) {
+        return `Trap (H: ${h}, S: ${s}, V: ${v})`;
     } else {
-      return `Unknown Type (R: ${r}, G: ${g}, B: ${b})`;
+        return `Unknown Type (H: ${h}, S: ${s}, V: ${v})`;
     }
   };
 
- const processFrame = useCallback(() => {
+    // Function to toggle fullscreen mode
+  const toggleFullscreen = () => {
+    const canvas = canvasRef.current;
+
+    if (!isFullscreen) {
+      // Request fullscreen
+      if (canvas.requestFullscreen) {
+        canvas.requestFullscreen();
+      } else if (canvas.mozRequestFullScreen) {
+        canvas.mozRequestFullScreen(); // Firefox
+      } else if (canvas.webkitRequestFullscreen) {
+        canvas.webkitRequestFullscreen(); // Chrome, Safari and Opera
+      } else if (canvas.msRequestFullscreen) {
+        canvas.msRequestFullscreen(); // IE/Edge
+      }
+
+      startCamera();
+
+      setIsFullscreen(true);
+    } else {
+      // Exit fullscreen
+      if (document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement) {
+        if (document.exitFullscreen) {
+          document.exitFullscreen();
+        } else if (document.mozCancelFullScreen) {
+          document.mozCancelFullScreen(); // Firefox
+        } else if (document.webkitExitFullscreen) {
+          document.webkitExitFullscreen(); // Chrome, Safari and Opera
+        } else if (document.msExitFullscreen) {
+          document.msExitFullscreen(); // IE/Edge
+        }
+      }
+
+      stopCamera();
+
+      setIsFullscreen(false);
+    }
+  };
+
+ const startCamera = useCallback(() => {
   if (canvasRef.current && isCvLoaded) {
     const video = document.createElement('video');
     // video.width = 640;
@@ -473,15 +573,18 @@ const HomePage = () => {
     video.autoplay = true;
 
     const videoConstraints = {
-      width: { ideal: 640 }, // Or use a resolution like 480
-      height: { ideal: 480 }, // Adjust based on your needs
-      facingMode: "environment", // "user" or "environment" depending on your camera use case
+      // width: { ideal: 640 }, // Or use a resolution like 480
+      // height: { ideal: 480 }, // Adjust based on your needs
+      facingMode: "user", // or "environment" depending on your camera use case
     };
 
     navigator.mediaDevices.getUserMedia({ video: videoConstraints }).then((stream) => {
       video.srcObject = stream;
       video.onloadedmetadata = () => {
         const context = canvasRef.current.getContext('2d');
+        canvasRef.current.width = video.videoWidth;
+        canvasRef.current.height = video.videoHeight;
+
         video.play();
 
         const drawFrame = () => {
@@ -489,11 +592,17 @@ const HomePage = () => {
             context.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
             context.drawImage(video, 0, 0, canvasRef.current.width, canvasRef.current.height);
 
+            const videoAspectRatio = video.videoWidth / video.videoHeight;
+
+            const centralBoxAspectRatio = 2 / 3;
+
             const canvasWidth = canvasRef.current.width;
             const canvasHeight = canvasRef.current.height;
-            const centralBoxWidth = canvasWidth * 0.50;
+
             const centralBoxHeight = canvasHeight * 0.975;
+            const centralBoxWidth = centralBoxHeight * centralBoxAspectRatio;
             const centralBoxArea = centralBoxWidth * centralBoxHeight;
+
             const centralBox = {
               x: (canvasWidth - centralBoxWidth) / 2,
               y: (canvasHeight - centralBoxHeight) / 2,
@@ -512,13 +621,13 @@ const HomePage = () => {
             cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
 
             const blurred = new cv.Mat();
-            cv.GaussianBlur(gray, blurred, new cv.Size(9, 9), 0);
+            cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
 
             const adaptiveThreshold = new cv.Mat();
             cv.adaptiveThreshold(blurred, adaptiveThreshold, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 11, 2);
 
             const edges = new cv.Mat();
-            cv.Canny(adaptiveThreshold, edges, 10, 40);
+            cv.Canny(adaptiveThreshold, edges, 10, 255);
 
             const contours = new cv.MatVector();
             const hierarchy = new cv.Mat();
@@ -541,6 +650,17 @@ const HomePage = () => {
                 rect.x + rect.width < centralBox.x + centralBox.width &&
                 rect.y + rect.height < centralBox.y + centralBox.height
               ) {
+
+                if(aspectRatio > 0.8 && aspectRatio < 1.2 && area > (centralBox.area * 0.375) && area < (centralBox.area * 0.5)){
+                  cv.rectangle(
+                    src,
+                    new cv.Point(rect.x, rect.y),
+                    new cv.Point(rect.x + rect.width, rect.y + rect.height),
+                    [0, 255, 0, 255], // Green color for all rectangles
+                    2
+                  );
+                }
+
                 if (aspectRatio > 0.8 && aspectRatio < 1.2 && area > (centralBox.area * 0.375) && area < (centralBox.area * 0.5) && !detectedArt && (rect.y > (centralBox.y + 20 + 50))) {
                   if(detectedDescription){
                     if(rect.y + rect.height < rectanglesToDraw[0].y){
@@ -562,7 +682,7 @@ const HomePage = () => {
                     rectanglesToDraw.push(rect);
                   }
                 }
-                if(detectedDescription && detectedArt && (rect.y + rect.height < rectanglesToDraw[0].y) && (rect.y + rect.height < rectanglesToDraw[1].y) && aspectRatio > 6.5 && aspectRatio < 8.5 && area > (centralBox.area * 0.02) && area < (centralBox.area * 0.19)){
+                if(detectedDescription && detectedArt && (rect.y + rect.height < rectanglesToDraw[0].y) && (rect.y + rect.height < rectanglesToDraw[1].y) && aspectRatio > 6.5 && aspectRatio < 8.5 && area > (centralBox.area * 0.05) && area < (centralBox.area * 0.19)){
                   rectanglesToDraw.push(rect);
                   detectedName = true;
                   console.log(area);
@@ -630,40 +750,56 @@ const HomePage = () => {
   }
 }, [isCvLoaded, imageCaptured]);
 
-  useEffect(() => {
-    if (canvasRef.current && isCvLoaded) {
-      requestAnimationFrame(processFrame);
-    }
-  }, [isCvLoaded, processFrame]);
+const stopCamera = () => {
+  const video = document.querySelector('video');
+  if (video && video.srcObject) {
+    let stream = video.srcObject;
+    let tracks = stream.getTracks();
 
-return (
+    tracks.forEach((track) => track.stop()); // Stop all tracks (i.e., stop the camera)
+    video.srcObject = null; // Remove the video
+
+  }
+};
+
+  return (
     <Routes>
       {/* Redirect from root to /Homepage */}
       <Route path="/" element={<Navigate to="/Homepage" />} />
+
       {/* Render the HomePage component */}
       <Route path="/Homepage" element={
-        <div className="container mx-auto p-4">
-          <h1 className="text-center text-3xl font-bold mb-4">Webcam Card Detection</h1>
-          <div className="flex flex-col items-center">
-            <canvas ref={canvasRef} width="640" height="480" className="border-2 border-gray-300" />
-            {imageCaptured && (
-              <div className="mt-4">
-                <h2 className="text-lg font-semibold">Captured Image</h2>
-                <img src={imageCaptured} alt="Captured Image" className="mt-2" />
-                {ocrText && (
-                  <div className="mt-2">
-                    <h3 className="text-md font-semibold">Detected Text:</h3>
-                    <p>{ocrText}</p>
-                  </div>
-                )}
-              </div>
-            )}
+        <div className="container">
+          <div className="row justify-content-center">
+            <div className="col-12 col-md-8 text-center my-3">
+              <h1 className="display-4">Webcam Card Detection</h1>
+
+              {/* Button to toggle fullscreen */}
+              <button className="btn btn-primary mb-3" onClick={toggleFullscreen}>
+                {isFullscreen ? "Exit Fullscreen" : "Go Fullscreen"}
+              </button>
+
+              <canvas
+                ref={canvasRef}
+                width="640"
+                height="480"
+                className="border border-secondary my-3"
+                style={{
+                  width: isFullscreen ? "100vw" : "640px", // Width takes whole screen if fullscreen
+                  height: isFullscreen ? "100vh" : "480px", // Height takes whole screen if fullscreen
+                  display: "block", // Ensure the canvas is centered
+                  margin: "0 auto", // Center the canvas horizontally
+                }}
+              />
+            </div>
           </div>
         </div>
       } />
+
       {/* Render the Market component */}
       <Route path="/market/:monsterName" element={<Market />} />
     </Routes>
   );
-};
+}
+
 export default HomePage;

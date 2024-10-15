@@ -1,11 +1,11 @@
-// market.js
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom'; // Import useParams
+import { useParams, useNavigate } from 'react-router-dom'; // Import useNavigate
 
 function Market() {
   const { monsterName } = useParams();
   const [cardData, setCardData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate(); // Initialize navigate
 
   // List of background image URLs
   const backgroundImages = [
@@ -20,7 +20,7 @@ function Market() {
       if (!monsterName) return;
       setLoading(true);
       try {
-        const response = await fetch(`http://localhost:4000/scrape?monster=${monsterName}`);
+        const response = await fetch(`https://045c-99-213-72-58.ngrok-free.app/scrape?monster=${monsterName}`);
         const data = await response.json();
         console.log('Fetched card data:', data);
         setCardData(data);
@@ -36,6 +36,11 @@ function Market() {
 
   const getRandomBackground = () => {
     return backgroundImages[Math.floor(Math.random() * backgroundImages.length)];
+  };
+
+  // Add a function to navigate back to the home page
+  const handleScanAgain = () => {
+    navigate("/Homepage"); // This will take you back to the home page
   };
 
   return (
@@ -69,6 +74,20 @@ function Market() {
           ))}
         </div>
       )}
+
+      {/* Add the Scan Again button */}
+      <button onClick={handleScanAgain} style={{
+        marginTop: '20px',
+        padding: '10px 20px',
+        fontSize: '16px',
+        backgroundColor: '#4CAF50',
+        color: 'white',
+        border: 'none',
+        borderRadius: '5px',
+        cursor: 'pointer'
+      }}>
+        Scan Again
+      </button>
     </div>
   );
 }
