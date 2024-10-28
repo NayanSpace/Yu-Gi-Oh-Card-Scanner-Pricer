@@ -575,7 +575,7 @@ const getAverageHSVColor = (imageOffScreen) => {
     const videoConstraints = {
       // width: { ideal: 640 }, // Or use a resolution like 480
       // height: { ideal: 480 }, // Adjust based on your needs
-      facingMode: "user", // or "environment" depending on your camera use case
+      facingMode: "environment", // "user" or "environment" depending on your camera use case
     };
 
     navigator.mediaDevices.getUserMedia({ video: videoConstraints }).then((stream) => {

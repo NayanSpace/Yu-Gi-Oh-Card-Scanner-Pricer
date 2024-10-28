@@ -9,9 +9,7 @@ function Market() {
 
   // List of background image URLs
   const backgroundImages = [
-    '/images/image2.png',
-    '/images/image1.png',
-    '/images/image3.png',
+    '/images/black.png',
   ];
 
   // Fetch card data when the component is loaded
@@ -20,7 +18,7 @@ function Market() {
       if (!monsterName) return;
       setLoading(true);
       try {
-        const response = await fetch(`https://045c-99-213-72-58.ngrok-free.app/scrape?monster=${monsterName}`);
+        const response = await fetch(`http://localhost:4000/scrape?monster=${monsterName}`);
         const data = await response.json();
         console.log('Fetched card data:', data);
         setCardData(data);

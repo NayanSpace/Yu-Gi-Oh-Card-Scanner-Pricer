@@ -26,6 +26,8 @@ app.get('/scrape', async (req, res) => {
 
     await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
+    await page.waitForFunction(() => !document.getElementById('loading') || document.getElementById('loading').style.display === 'none');
+
     // Wait for the page to load and display results
     await page.waitForSelector('.primary-content');
 
